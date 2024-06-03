@@ -2,8 +2,7 @@ import json
 import os
 from typing import Optional
 
-import pinecone
-from dotenv import load_dotenv
+from pinecone import Pinecone, ServerlessSpec
 from langchain.chains import RetrievalQA
 from langchain.docstore.document import Document
 from langchain.embeddings.base import Embeddings
@@ -14,43 +13,41 @@ from langchain_pinecone import PineconeVectorStore
 
 class RAG:
     """
-    The RAG (Retrieval-Augmented Generation) class represents a model that combines retrieval-based and
-    generation-based approaches for question answering.
+    RAG (Retrieval-Augmented Generation) class represents a model that combines retrieval-based and generation-based approaches for question answering.
 
     Args:
         index_name (str): The name of the index used for storing and retrieving documents.
         embedding_model (Embeddings): The embedding model used for encoding text into vectors.
-        data_path (str): The path to the data directory containing the documents.
-        text_splitter (Optional[TextSplitter]): The text splitter used for splitting documents into chunks.
-            If not provided, a default RecursiveCharacterTextSplitter will be used.
+        google_api_key (str): The API key for accessing the Google API.
+        pinecone_api_key (str): The API key for accessing the Pinecone service.
+        text_splitter (Optional[TextSplitter], optional): The text splitter used for splitting long documents into smaller chunks. Defaults to None.
 
     Attributes:
-        pc_client (PineconeClient): The Pinecone client used for interacting with the Pinecone service.
+        pc_client (Pinecone.Client): The Pinecone client used for interacting with the Pinecone service.
         index_name (str): The name of the index used for storing and retrieving documents.
         embedding_model (Embeddings): The embedding model used for encoding text into vectors.
-        text_splitter (TextSplitter): The text splitter used for splitting documents into chunks.
+        text_splitter (TextSplitter): The text splitter used for splitting long documents into smaller chunks.
         vectorstore (PineconeVectorStore): The vector store used for storing and retrieving document vectors.
         qa (RetrievalQA): The RAG model for question answering.
 
     Methods:
         prepare_vector_store(data_path: str) -> None:
             Prepares the vector store for the RAG model by adding documents from the specified data path.
-        ask(question: str) -> str:
-            Queries the RAG model with a question and returns the answer.
 
+        ask(question: str) -> str:
+            Queries the RAG model with the given question and returns the generated answer.
     """
 
     def __init__(
         self,
         index_name: str,
         embedding_model: Embeddings,
-        data_path: str,
+        google_api_key: str,
+        pinecone_api_key: str,
         text_splitter: Optional[TextSplitter] = None,
     ) -> None:
-        load_dotenv()
-        self.pc_client = pinecone.Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-
-        self.index_name = index_name
+        
+        self.pc_client = Pinecone(api_key=pinecone_api_key)
         self.embedding_model = embedding_model
         self.text_splitter = (
             text_splitter
@@ -60,6 +57,7 @@ class RAG:
 
         # check if index exists
         indexes = self.pc_client.list_indexes().names()
+
         # if not, create it
         if index_name not in indexes:
             embedding_dim = embedding_model.client.get_sentence_embedding_dimension()
@@ -69,20 +67,18 @@ class RAG:
                 name=index_name,
                 dimension=embedding_dim,
                 metric=metric,
-                spec=pinecone.ServerlessSpec(cloud="aws", region="us-east-1"),
+                spec=ServerlessSpec(cloud="aws", region="us-east-1"),
             )
 
         self.vectorstore = PineconeVectorStore(
-            index_name=index_name, embedding=embedding_model
+            index_name=index_name, embedding=embedding_model, pinecone_api_key=pinecone_api_key
         )
-        # add sources data to the vector store
-        self.prepare_vector_store(data_path)
 
         # use the vector store as a retriever
         retriever = self.vectorstore.as_retriever(search_kwargs={"k": 3})
         # create the RAG model using the retriever and PaLM model
         self.qa = RetrievalQA.from_chain_type(
-            llm=google_palm.ChatGooglePalm(google_api_key=os.getenv("GOOGLE_API_KEY")),
+            llm=google_palm.ChatGooglePalm(google_api_key=google_api_key),
             chain_type="stuff",
             retriever=retriever,
         )
